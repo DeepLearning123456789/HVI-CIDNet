@@ -14,14 +14,16 @@ from PIL import Image
 def from_pretrained(cls, pretrained_model_name_or_path: str):
     model_id = str(pretrained_model_name_or_path)
 
-    config_file = hf_hub_download(repo_id=model_id, filename="config.json", repo_type="model")
+    # config_file = hf_hub_download(repo_id=model_id, filename="config.json", repo_type="model")
+    config_file = "models/HVI-CIDNet-LOLv1-wperc/config.json"
     config = None
     if config_file is not None:
         with open(config_file, "r", encoding="utf-8") as f:
             config = json.load(f)
 
 
-    model_file = hf_hub_download(repo_id=model_id, filename="model.safetensors", repo_type="model")
+    # model_file = hf_hub_download(repo_id=model_id, filename="model.safetensors", repo_type="model")
+    model_file = "models/HVI-CIDNet-LOLv1-wperc/model.safetensors"
     # instance = sf.load_model(cls, model_file, strict=False)
     state_dict  = sf.load_file(model_file)
     cls.load_state_dict(state_dict, strict=False) 
