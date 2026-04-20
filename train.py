@@ -57,11 +57,14 @@ def train(epoch):
             output_rgb = model(im1)  
             
         gt_rgb = im2
-        output_hvi = model.HVIT(output_rgb)
-        gt_hvi = model.HVIT(gt_rgb)
-        loss_hvi = L1_loss(output_hvi, gt_hvi) + D_loss(output_hvi, gt_hvi) + E_loss(output_hvi, gt_hvi) + opt.P_weight * P_loss(output_hvi, gt_hvi)[0]
+        
+        #hvi损失
+        #output_hvi = model.HVIT(output_rgb)
+        #gt_hvi = model.HVIT(gt_rgb)
+        #loss_hvi = L1_loss(output_hvi, gt_hvi) + D_loss(output_hvi, gt_hvi) + E_loss(output_hvi, gt_hvi) + opt.P_weight * P_loss(output_hvi, gt_hvi)[0]
         loss_rgb = L1_loss(output_rgb, gt_rgb) + D_loss(output_rgb, gt_rgb) + E_loss(output_rgb, gt_rgb) + opt.P_weight * P_loss(output_rgb, gt_rgb)[0]
-        loss = loss_rgb + opt.HVI_weight * loss_hvi
+        #loss = loss_rgb + opt.HVI_weight * loss_hvi
+        loss = loss_rgb
         iter += 1
         
         if opt.grad_clip:
@@ -114,7 +117,8 @@ def load_datasets():
         test_set = get_eval_set(opt.data_val_lolv2_real)
         
     elif opt.dataset == 'lolv2_syn':
-        train_set = get_lol_v2_syn_training_set(opt.data_train_lolv2_syn,size=opt.cropSize)
+        #train_set = get_lol_v2_syn_training_set(opt.data_train_lolv2_syn,size=opt.cropSize)
+        train_set = get_lol_v2_syn_training_set(opt.data_train_lolv2_syn,size=0)
         test_set = get_eval_set(opt.data_val_lolv2_syn)
     
     elif opt.dataset == 'SID':
@@ -143,7 +147,7 @@ def build_model():
     print('===> Building model ')
     model = CIDNet().cuda()
     if opt.start_epoch > 0:
-        pth = f"./weights/train/epoch_{opt.start_epoch}.pth"
+        pth = f"./weights/train-v2-syn-256-001/epoch_{opt.start_epoch}.pth"
         model.load_state_dict(torch.load(pth, map_location=lambda storage, loc: storage))
     return model
 
@@ -169,7 +173,7 @@ def init_loss():
     L1_weight   = opt.L1_weight
     D_weight    = opt.D_weight 
     E_weight    = opt.E_weight 
-    P_weight    = 1.0
+    P_weight    = opt.P_weight
     
     L1_loss= L1Loss(loss_weight=L1_weight, reduction='mean').cuda()
     D_loss = SSIM(weight=D_weight).cuda()
@@ -263,6 +267,8 @@ if __name__ == '__main__':
                  norm_size=norm_size, LOL=is_lol_v1, v2=is_lolv2_real, alpha=0.8)
             
             avg_psnr, avg_ssim, avg_lpips = metrics(im_dir, label_dir, use_GT_mean=False)
+            #avg_psnr, avg_ssim, avg_lpips = metrics(im_dir, label_dir, use_GT_mean=True)
+            
             print("===> Avg.PSNR: {:.4f} dB ".format(avg_psnr))
             print("===> Avg.SSIM: {:.4f} ".format(avg_ssim))
             print("===> Avg.LPIPS: {:.4f} ".format(avg_lpips))

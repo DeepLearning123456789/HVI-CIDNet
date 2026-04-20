@@ -70,12 +70,19 @@ class CIDNet(nn.Module, PyTorchModelHubMixin):
         
     def forward(self, x):
         dtypes = x.dtype
-        hvi = self.trans.HVIT(x)
-        i = hvi[:,2,:,:].unsqueeze(1).to(dtypes)
+        # --- 注释掉 HVI 相关转换 ---
+        #hvi = self.trans.HVIT(x)
+        #i = hvi[:,2,:,:].unsqueeze(1).to(dtypes)
+        i_input = x.mean(dim=1, keepdim=True).to(dtypes) # 提取亮度作为 I-branch 输入
+        hv_input = x # 原始 RGB 作为 HV-branch 输入 
+        
         # low
-        i_enc0 = self.IE_block0(i)
+        #i_enc0 = self.IE_block0(i)
+        i_enc0 = self.IE_block0(i_input)
         i_enc1 = self.IE_block1(i_enc0)
-        hv_0 = self.HVE_block0(hvi)
+        
+        #hv_0 = self.HVE_block0(hvi)
+        hv_0 = self.HVE_block0(hv_input)
         hv_1 = self.HVE_block1(hv_0)
         i_jump0 = i_enc0
         hv_jump0 = hv_0
@@ -116,8 +123,11 @@ class CIDNet(nn.Module, PyTorchModelHubMixin):
         hv_1 = self.HVD_block1(hv_1, hv_jump0)
         hv_0 = self.HVD_block0(hv_1)
         
-        output_hvi = torch.cat([hv_0, i_dec0], dim=1) + hvi
-        output_rgb = self.trans.PHVIT(output_hvi)
+        #output_hvi = torch.cat([hv_0, i_dec0], dim=1) + hvi
+        #output_rgb = self.trans.PHVIT(output_hvi)
+        # sRGB 基线：直接将残差加到输入 x 上
+        out_residual = torch.cat([hv_0, i_dec0], dim=1) 
+        output_rgb = out_residual + x
 
         return output_rgb
     
