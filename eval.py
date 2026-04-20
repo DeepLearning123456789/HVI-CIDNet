@@ -41,7 +41,13 @@ def eval(model, testing_data_loader, model_path, output_folder,norm_size=True,LO
             output = output[:, :, :h, :w]
         
         output_img = transforms.ToPILImage()(output.squeeze(0))
-        output_img.save(output_folder + name[0])
+        #output_img.save(output_folder + name[0])
+        save_name = name[0]
+        if save_name.startswith('low'):
+            save_name = save_name.replace('low', 'normal')
+
+        output_img.save(output_folder + save_name)
+        
         torch.cuda.empty_cache()
     print('===> End evaluation')
     if LOL:
@@ -94,31 +100,35 @@ if __name__ == '__main__':
         eval_data = DataLoader(dataset=get_eval_set("./datasets/LOLdataset/eval15/low"), num_workers=num_workers, batch_size=1, shuffle=False)
         output_folder = './output/LOLv1/'
         if ep.perc:
-            weight_path = './weights/LOLv1/w_perc.pth'
+            #weight_path = './weights_original/LOLv1/w_perc.pth'
+            weight_path = './weights/train-v1-2026-04-17-234005/epoch_1000.pth'
         else:
-            weight_path = './weights/LOLv1/wo_perc.pth'
-        
+            # weight_path = './weights_original/LOLv1/wo_perc.pth'
+            weight_path = './weights/train-v1-2026-04-17-234005/epoch_1000.pth'
             
     elif ep.lol_v2_real:
         eval_data = DataLoader(dataset=get_eval_set("./datasets/LOLv2/Real_captured/Test/Low"), num_workers=num_workers, batch_size=1, shuffle=False)
         output_folder = './output/LOLv2_real/'
         if ep.best_GT_mean:
-            weight_path = './weights/LOLv2_real/w_perc.pth'
+            weight_path = './weights_original/LOLv2_real/w_perc.pth'
             alpha = 0.84
         elif ep.best_PSNR:
-            weight_path = './weights/LOLv2_real/best_PSNR.pth'
+            weight_path = './weights_original/LOLv2_real/best_PSNR.pth'
+            # weight_path = './weights/train-v2-2026-04-18-130141/epoch_200.pth'
             alpha = 0.8
         elif ep.best_SSIM:
-            weight_path = './weights/LOLv2_real/best_SSIM.pth'
+            weight_path = './weights_original/LOLv2_real/best_SSIM.pth'
             alpha = 0.82
             
     elif ep.lol_v2_syn:
         eval_data = DataLoader(dataset=get_eval_set("./datasets/LOLv2/Synthetic/Test/Low"), num_workers=num_workers, batch_size=1, shuffle=False)
         output_folder = './output/LOLv2_syn/'
         if ep.perc:
-            weight_path = './weights/LOLv2_syn/w_perc.pth'
+            # weight_path = './weights/LOLv2_syn/w_perc.pth'
+            weight_path = './weights/train-v2-syn-256-001/epoch_210.pth'
         else:
-            weight_path = './weights/LOLv2_syn/wo_perc.pth'
+            # weight_path = './weights/LOLv2_syn/wo_perc.pth'
+            weight_path = './weights/train-v2-syn-256-001/epoch_210.pth'
             
     elif ep.SICE_grad:
         eval_data = DataLoader(dataset=get_SICE_eval_set("./datasets/SICE/SICE_Grad"), num_workers=num_workers, batch_size=1, shuffle=False)
