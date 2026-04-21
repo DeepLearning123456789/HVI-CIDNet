@@ -46,6 +46,33 @@ class RGB_HVI(nn.Module):
         xyz = torch.cat([H, V, I],dim=1)
         return xyz
     
+    def HSVT(self, img):
+        # 1. 前半部分逻辑与 HVIT 完全相同：提取基础的 H, S, V
+        eps = 1e-8
+        device = img.device
+        dtypes = img.dtype
+        hue = torch.Tensor(img.shape[0], img.shape[2], img.shape[3]).to(device).to(dtypes)
+        value = img.max(1)[0].to(dtypes)
+        img_min = img.min(1)[0].to(dtypes)
+        hue[img[:,2]==value] = 4.0 + ( (img[:,0]-img[:,1]) / (value - img_min + eps)) [img[:,2]==value]
+        hue[img[:,1]==value] = 2.0 + ( (img[:,2]-img[:,0]) / (value - img_min + eps)) [img[:,1]==value]
+        hue[img[:,0]==value] = (0.0 + ((img[:,1]-img[:,2]) / (value - img_min + eps)) [img[:,0]==value]) % 6
+        hue[img.min(1)[0]==value] = 0.0
+        hue = hue/6.0
+        saturation = (value - img_min ) / (value + eps )
+        saturation[value==0] = 0
+
+        # 2. 消融实验的核心：去掉 color_sensitive (Ck) 和三角函数映射
+        # HSV 分支直接输出原始的 H, S 和 I (即 V)
+        H = hue.unsqueeze(1)
+        S = saturation.unsqueeze(1)
+        I = value.unsqueeze(1)
+        
+        # 为了适配 CIDNet 的 HV 分支输入通道 (3通道)，我们将 H, S, I 拼接
+        # 在 HSV 消融实验中，HV 分支看到的是标准的 HSV 表达
+        hsv = torch.cat([H, S, I], dim=1) 
+        return hsv
+    
     def PHVIT(self, img):
         eps = 1e-8
         H,V,I = img[:,0,:,:],img[:,1,:,:],img[:,2,:,:]
@@ -119,4 +146,59 @@ class RGB_HVI(nn.Module):
         rgb = torch.cat([r, g, b], dim=1)
         if self.gated2:
             rgb = rgb * self.alpha
+        return rgb
+
+
+    def PHSVT(self, img):
+        # 这是标准 HSV 到 RGB 的转换，去掉 PHVIT 里的反极化逻辑
+        h = img[:, 0, :, :]
+        s = img[:, 1, :, :]
+        v = img[:, 2, :, :]
+        
+        h = h % 1
+        s = torch.clamp(s, 0, 1)
+        v = torch.clamp(v, 0, 1)
+
+        r = torch.zeros_like(h)
+        g = torch.zeros_like(h)
+        b = torch.zeros_like(h)
+        
+        hi = torch.floor(h * 6.0)
+        f = h * 6.0 - hi
+        p = v * (1. - s)
+        q = v * (1. - (f * s))
+        t = v * (1. - ((1. - f) * s))
+        
+        hi0 = hi==0
+        hi1 = hi==1
+        hi2 = hi==2
+        hi3 = hi==3
+        hi4 = hi==4
+        hi5 = hi==5
+        
+        r[hi0] = v[hi0]
+        g[hi0] = t[hi0]
+        b[hi0] = p[hi0]
+        
+        r[hi1] = q[hi1]
+        g[hi1] = v[hi1]
+        b[hi1] = p[hi1]
+        
+        r[hi2] = p[hi2]
+        g[hi2] = v[hi2]
+        b[hi2] = t[hi2]
+        
+        r[hi3] = p[hi3]
+        g[hi3] = q[hi3]
+        b[hi3] = v[hi3]
+        
+        r[hi4] = t[hi4]
+        g[hi4] = p[hi4]
+        b[hi4] = v[hi4]
+        
+        r[hi5] = v[hi5]
+        g[hi5] = p[hi5]
+        b[hi5] = q[hi5]
+        
+        rgb = torch.cat([r.unsqueeze(1), g.unsqueeze(1), b.unsqueeze(1)], dim=1)
         return rgb
