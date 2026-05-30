@@ -7,13 +7,12 @@ class RGB_HVI(nn.Module):
     def __init__(self):
         super(RGB_HVI, self).__init__()
         # self.density_k = torch.nn.Parameter(torch.full([1],0.2)) # k is reciprocal to the paper mentioned
+        self.base_k = torch.nn.Parameter(torch.full([1], 0.2))
         self.k_predictor = nn.Sequential(
             nn.Conv2d(3, 16, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
-            nn.Conv2d(16, 16, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
             nn.Conv2d(16, 1, kernel_size=1),
-            nn.Sigmoid() # 用 Sigmoid 将 K 值限制在 (0, 1) 之间，保证数值稳定
+            nn.Tanh()
         )
         self.gated = False
         self.gated2= False
@@ -49,7 +48,7 @@ class RGB_HVI(nn.Module):
         #color_sensitive = ((value * 0.5 * pi).sin() + eps).pow(k)
         
         #通过网络动态生成像素级 K 值
-        k_map = self.k_predictor(img)
+        k_map = self.base_k + self.k_predictor(img) * 0.1 
         self.current_k_map = k_map  # 缓存特征图，供同 Batch 的逆变换 PHVIT 使用
         # 原先的标量 k 替换为 k_map，依靠 PyTorch 的广播机制进行矩阵幂运算
         color_sensitive = ((value * 0.5 * pi).sin() + eps).pow(k_map)
