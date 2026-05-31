@@ -5,6 +5,44 @@ from net.transformer_utils import *
 from net.LCA import *
 from huggingface_hub import PyTorchModelHubMixin
 
+import torch.fft # 导入PyTorch频域操作库
+class FourierLowPassAttention(nn.Module):
+    def __init__(self, in_channels):
+        super(FourierLowPassAttention, self).__init__()
+        # 在频域使用的轻量级通道交互层，用于自适应调整各频段的权重
+        self.frequency_dw = nn.Sequential(
+            nn.Conv2d(in_channels * 2, in_channels * 2, kernel_size=1, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(in_channels * 2, in_channels * 2, kernel_size=1, bias=False),
+            nn.Sigmoid()
+        )
+        
+    def forward(self, x):
+        B, C, H, W = x.shape
+        
+        # 1. 快速傅里叶变换 (FFT) 到频域
+        # 使用 rfft2 处理实数图像，效率更高
+        x_freq = torch.fft.rfft2(x, norm='ortho')
+        
+        # 2. 由于复数 Tensor 无法直接进行卷积，我们将实部和虚部拼接起来
+        x_real = x_freq.real
+        x_imag = x_freq.imag
+        x_complex_concat = torch.cat([x_real, x_imag], dim=1) # [B, 2*C, H, W//2 + 1]
+        
+        # 3. 频域注意力机制 (Fourier Attention)
+        # 这一步能让网络自适应学习过滤掉高频噪声的能量分布
+        freq_weights = self.frequency_dw(x_complex_concat)
+        x_complex_concat = x_complex_concat * freq_weights
+        
+        # 4. 恢复复数形式
+        x_real_out, x_imag_out = torch.chunk(x_complex_concat, 2, dim=1)
+        x_freq_out = torch.complex(x_real_out, x_imag_out)
+        
+        # 5. 逆快速傅里叶变换 (IFFT) 回到空间域
+        x_spatial = torch.fft.irfft2(x_freq_out, s=(H, W), norm='ortho')
+        
+        return x_spatial
+
 class CIDNet(nn.Module, PyTorchModelHubMixin):
     def __init__(self, 
                  channels=[36, 36, 72, 144],
@@ -16,6 +54,9 @@ class CIDNet(nn.Module, PyTorchModelHubMixin):
         
         [ch1, ch2, ch3, ch4] = channels
         [head1, head2, head3, head4] = heads
+        
+        # 在最初的特征层 ch1 定义频域解耦注意力模块
+        self.fourier_attn = FourierLowPassAttention(in_channels=ch1)
         
         # HV_ways
         self.HVE_block0 = nn.Sequential(
@@ -74,6 +115,12 @@ class CIDNet(nn.Module, PyTorchModelHubMixin):
         i = hvi[:,2,:,:].unsqueeze(1).to(dtypes)
         # low
         i_enc0 = self.IE_block0(i)
+        
+        # 在 i_enc0 提取完 shallow 特征后，立即进行快速傅里叶变换与频域自注意力
+        # 这样可以在噪声刚被映射到高维特征空间时，直接从频域过滤掉随机的高频传感器噪声
+        i_enc0_denoised = self.fourier_attn(i_enc0)
+        i_enc0 = i_enc0 + i_enc0_denoised # 残差连接，保证基础结构和梯度的稳定性
+        
         i_enc1 = self.IE_block1(i_enc0)
         hv_0 = self.HVE_block0(hvi)
         hv_1 = self.HVE_block1(hv_0)
