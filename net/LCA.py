@@ -1,10 +1,43 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from einops import rearrange
-from net.transformer_utils import *
+
+from net.transformer_utils import LayerNorm
+
+
+# Spatial Attention
+class SpatialGate(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.compress = nn.Conv2d(2, 1, kernel_size=7, padding=3, bias=False)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+
+        avg_out = torch.mean(x, dim=1, keepdim=True)
+        max_out, _ = torch.max(x, dim=1, keepdim=True)
+        attn = torch.cat( [avg_out, max_out], dim=1)
+        attn = self.compress(attn)
+
+        return x * self.sigmoid(attn)
+
+
+# Channel Attention
+class ChannelGate(nn.Module):
+
+    def __init__(self, dim, reduction=16):
+        super().__init__()
+        hidden = max(dim // reduction, 4)
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.fc = nn.Sequential(nn.Conv2d(dim, hidden, 1, bias=False), nn.ReLU(inplace=True), nn.Conv2d(hidden, dim, 1, bias=False), nn.Sigmoid())
+
+    def forward(self, x):
+        weight = self.fc(self.avg_pool(x))
+        return x * weight
+
 
 # Cross Attention Block
-class CAB(nn.Module):
     def __init__(self, dim, num_heads, bias):
         super(CAB, self).__init__()
         self.num_heads = num_heads
@@ -31,7 +64,7 @@ class CAB(nn.Module):
         k = torch.nn.functional.normalize(k, dim=-1)
 
         attn = (q @ k.transpose(-2, -1)) * self.temperature
-        attn = nn.functional.softmax(attn,dim=-1)
+        attn = attn.softmax(dim=-1)
 
         out = (attn @ v)
 
@@ -39,10 +72,11 @@ class CAB(nn.Module):
 
         out = self.project_out(out)
         return out
-    
 
-# Intensity Enhancement Layer
+
+# IEL
 class IEL(nn.Module):
+
     def __init__(self, dim, ffn_expansion_factor=2.66, bias=False):
         super(IEL, self).__init__()
 
@@ -56,38 +90,69 @@ class IEL(nn.Module):
        
         self.project_out = nn.Conv2d(hidden_features, dim, kernel_size=1, bias=bias)
 
-        self.Tanh = nn.Tanh()
     def forward(self, x):
         x = self.project_in(x)
         x1, x2 = self.dwconv(x).chunk(2, dim=1)
-        x1 = self.Tanh(self.dwconv1(x1)) + x1
-        x2 = self.Tanh(self.dwconv2(x2)) + x2
+        x1 = torch.tanh(self.dwconv1(x1)) + x1
+        x2 = torch.tanh(self.dwconv2(x2)) + x2
         x = x1 * x2
         x = self.project_out(x)
         return x
-  
-  
-# Lightweight Cross Attention
-class HV_LCA(nn.Module):
-    def __init__(self, dim,num_heads, bias=False):
-        super(HV_LCA, self).__init__()
-        self.gdfn = IEL(dim) # IEL and CDL have same structure
+
+
+# Region Refinement Block
+class RegionRefinementBlock(nn.Module):
+
+    def __init__(self, dim):
+        super().__init__()
+        self.mask_predictor = nn.Sequential(nn.Conv2d(dim, dim // 2, 3, 1, 1), nn.GELU(), nn.Conv2d(dim // 2, 1, 1), nn.Sigmoid())
+        self.conv_branch = nn.Sequential( nn.Conv2d(dim, dim, 3, 1, 1), nn.GELU(), nn.Conv2d(dim, dim, 3, 1, 1) )
+        self.attn_branch = CAB(dim, num_heads=4)
+
+    def forward(self, x):
+        mask = self.mask_predictor(x)
+        high = x * mask
+        low = x * (1 - mask)
+        high = self.attn_branch(high, high)
+        low = self.conv_branch(low)
+        out = high + low + x
+        return out
+
+
+# Enhanced HV-LCA
+
+class EnhancedHV_LCA(nn.Module):
+
+    def __init__(self, dim, num_heads, bias=False):
+        super().__init__()
         self.norm = LayerNorm(dim)
-        self.ffn = CAB(dim, num_heads, bias)
-        
+        self.cab = CAB(dim, num_heads, bias)
+        self.channel_gate = ChannelGate(dim)
+        self.spatial_gate = SpatialGate()
+        self.iel = IEL(dim)
+
     def forward(self, x, y):
-        x = x + self.ffn(self.norm(x),self.norm(y))
-        x = self.gdfn(self.norm(x))
+        x = x + self.cab(self.norm(x), self.norm(y))
+        x = self.channel_gate(x)
+        x = self.spatial_gate(x)
+        x = x + self.iel(self.norm(x))
         return x
-    
-class I_LCA(nn.Module):
-    def __init__(self, dim,num_heads, bias=False):
-        super(I_LCA, self).__init__()
+
+
+# Enhanced I-LCA
+class EnhancedI_LCA(nn.Module):
+
+    def __init__(self, dim, num_heads, bias=False):
+        super().__init__()
         self.norm = LayerNorm(dim)
-        self.gdfn = IEL(dim)
-        self.ffn = CAB(dim, num_heads, bias=bias)
-        
+        self.cab = CAB(dim, num_heads, bias)
+        self.channel_gate = ChannelGate(dim)
+        self.spatial_gate = SpatialGate()
+        self.iel = IEL(dim)
+
     def forward(self, x, y):
-        x = x + self.ffn(self.norm(x),self.norm(y))
-        x = x + self.gdfn(self.norm(x)) 
+        x = x + self.cab(self.norm(x), self.norm(y))
+        x = self.channel_gate(x)
+        x = self.spatial_gate(x)
+        x = x + self.iel(self.norm(x))
         return x
